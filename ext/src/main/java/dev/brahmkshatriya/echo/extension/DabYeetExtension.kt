@@ -17,7 +17,6 @@ import dev.brahmkshatriya.echo.common.models.Artist
 import dev.brahmkshatriya.echo.common.models.EchoMediaItem
 import dev.brahmkshatriya.echo.common.models.Feed
 import dev.brahmkshatriya.echo.common.models.Feed.Companion.toFeed
-import dev.brahmkshatriya.echo.common.models.Message
 import dev.brahmkshatriya.echo.common.models.Playlist
 import dev.brahmkshatriya.echo.common.models.Radio
 import dev.brahmkshatriya.echo.common.models.Shelf
@@ -25,13 +24,11 @@ import dev.brahmkshatriya.echo.common.models.Streamable
 import dev.brahmkshatriya.echo.common.models.Streamable.Media.Companion.toServerMedia
 import dev.brahmkshatriya.echo.common.models.Track
 import dev.brahmkshatriya.echo.common.models.User
-import dev.brahmkshatriya.echo.common.providers.MessageFlowProvider
 import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
 import dev.brahmkshatriya.echo.extension.models.LoginResponse
 import dev.brahmkshatriya.echo.extension.models.Pagination
 import dev.brahmkshatriya.echo.extension.network.ApiService
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
@@ -53,9 +50,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
 
     override suspend fun onExtensionSelected() {}
 
-    override suspend fun onInitialize() {}
+    override suspend fun onInitialize() {
+        _session = null
+        likedList.clear()
+    }
 
-    override suspend fun getSettingItems(): List<Setting> = listOf<Setting>()
+    override suspend fun getSettingItems(): List<Setting> = listOf()
 
     override fun setSettings(settings: Settings) {}
 
@@ -122,10 +122,10 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     // ====== ArtistClient ===== //
 
     override suspend fun loadArtist(artist: Artist): Artist {
-        if (artist.isLoaded()) {
-            return artist
+        return if (artist.isLoaded()) {
+            artist
         } else {
-            return api.getArtist(artist.id).toArtist()
+            api.getArtist(artist.id).toArtist()
         }
     }
 
@@ -151,7 +151,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
 
 
     override val forms: List<LoginClient.Form>
-        get() = listOf<LoginClient.Form>(
+        get() = listOf(
             LoginClient.Form(
                 key = "register",
                 "Register",
@@ -203,8 +203,8 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         key: String,
         data: Map<String, String?>
     ): List<User> {
-        when {
-            key == "login" -> {
+        when (key) {
+            "login" -> {
                 val email = requireNotNull(data["email"]) { "Email is required" }
                 val password = requireNotNull(data["password"]) { "Password is required" }
                 val response = api.login(email, password)
@@ -220,8 +220,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                 )
 
             }
-
-            key == "register" -> {
+            "register" -> {
                 val username = requireNotNull(data["username"]) { "Username is required" }
                 val email = requireNotNull(data["email"]) { "Email is required" }
                 val password = requireNotNull(data["password"]) { "Password is required" }
@@ -236,7 +235,6 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     )
                 )
             }
-
             else -> {
                 throw IllegalArgumentException("Invalid login form key: $key")
             }
@@ -262,9 +260,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
 
 
     override fun setLoginUser(user: User?) {
-        user.let {
-            _session = it?.extras?.get("session")
-        }
+        _session = user?.extras?.get("session")
     }
 
     override suspend fun getCurrentUser(): User? = null
@@ -274,8 +270,10 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     override suspend fun loadLibraryFeed(): Feed<Shelf> {
         val session = _session ?: throw ClientException.LoginRequired()
 
-        likedList.clear()
-        likedList.addAll(api.getFavourites(session).track.map { it.toTrack() })
+        likedList.run {
+            clear()
+            addAll(api.getFavourites(session).track.map { it.toTrack() })
+        }
         shouldFetchLikes = false
 
         val favShelf = Shelf.Lists.Items(
@@ -291,7 +289,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     // ===== LikeClient ===== //
 
     private var shouldFetchLikes = true
-    private var likedList: MutableList<EchoMediaItem> = mutableListOf<EchoMediaItem>()
+    private var likedList: MutableList<EchoMediaItem> = mutableListOf()
 
     override suspend fun likeItem(
         item: EchoMediaItem,
@@ -308,10 +306,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     }
 
     override suspend fun isItemLiked(item: EchoMediaItem): Boolean {
-        val session = _session ?: throw ClientException.LoginRequired()
+        val session = _session ?: return false
         if (shouldFetchLikes) {
-            likedList.clear()
-            likedList.addAll(api.getFavourites(session).track.map { it.toTrack() })
+            likedList.run {
+                clear()
+                addAll(api.getFavourites(session).track.map { it.toTrack() })
+            }
             shouldFetchLikes = false
         }
         return likedList.any { it.id == item.id }

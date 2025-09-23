@@ -12,7 +12,7 @@ import okhttp3.Response
 
 class ApiService(client: OkHttpClient) : BaseHttpClient(client) {
 
-    override val baseUrl: String = "https://dab.yeet.su/api/"
+    override val baseUrl: String = "https://dabmusic.xyz/api/"
 
     suspend fun getAlbum(id: String): AlbumResponse {
         return get("album", mapOf("albumId" to id))
