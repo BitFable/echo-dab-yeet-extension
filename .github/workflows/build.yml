@@ -59,16 +59,14 @@ jobs:
         with:
           path: ${{ env.APP_PATH }}
 
-      - name: Upload APK to Telegram
-        shell: bash
-        env:
-          BOT_ID: ${{ secrets.TELEGRAM_BOT_ID }}
-          CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${BOT_ID}/sendDocument" \
-            -F chat_id="${CHANNEL_ID}" \
-            -F document=@"${{ env.APP_PATH }}" \
-            -F caption="Dab yeet extension - ${{ env.VERSION }}"
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: true
+          tag_name: ${{ env.VERSION }}
+          body_path: commit.txt
+          name: ${{ env.VERSION }}
+          files: ${{ env.APP_PATH }}
 
       - name: Delete Old Releases
         uses: sgpublic/delete-release-action@master

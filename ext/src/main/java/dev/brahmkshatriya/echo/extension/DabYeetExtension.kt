@@ -35,14 +35,13 @@ import okhttp3.OkHttpClient
 class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumClient, ArtistClient,
     ShareClient, LoginClient.CustomInput, LibraryFeedClient, LikeClient {
 
-    private val client by lazy { OkHttpClient.Builder().build() }
-
-    private val api = ApiService(client)
-
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
+    private val client by lazy { OkHttpClient.Builder().build() }
+
+    private val api by lazy { ApiService(client, json) }
 
     private var _session: String? = null
 
@@ -62,13 +61,14 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     //==== SearchFeedClient ====//
 
     override suspend fun loadSearchFeed(query: String): Feed<Shelf> {
+        val session = _session ?: throw ClientException.LoginRequired()
         if (query.isBlank()) return emptyList<Shelf>().toFeed()
 
         val albumShelf = buildPagedShelf(
             id = "0",
             title = "Albums",
             type = Shelf.Lists.Type.Linear,
-            search = { offset -> api.search(query, offset, MediaType.Album.type) },
+            search = { offset -> api.search(query, offset, MediaType.Album.type, session) },
             extractItems = { it.albums?.map { a -> a.toAlbum() } ?: emptyList() },
             extractPagination = { it.pagination }
         )
@@ -77,7 +77,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             id = "1",
             title = "Tracks",
             type = Shelf.Lists.Type.Grid,
-            search = { offset -> api.search(query, offset, MediaType.Track.type) },
+            search = { offset -> api.search(query, offset, MediaType.Track.type, session) },
             extractItems = { it.tracks?.map { t -> t.toTrack() } ?: emptyList() },
             extractPagination = { it.pagination }
         )
@@ -174,6 +174,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                         key = "password",
                         label = "Password",
                         isRequired = true
+                    ),
+                    LoginClient.InputField(
+                        type = LoginClient.InputField.Type.Misc,
+                        key = "inviteCode",
+                        label = "Invite Code",
+                        isRequired = true
                     )
                 )
             ),
@@ -204,10 +210,28 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         data: Map<String, String?>
     ): List<User> {
         when (key) {
+            "register" -> {
+                val response = api.register(
+                    username = data["username"]!!,
+                    email = data["email"]!!,
+                    password = data["password"]!!,
+                    inviteCode = data["inviteCode"]!!
+                )
+                val session = extractSession(response.headers["set-cookie"])
+                    ?: throw Exception("Failed to extract session from response")
+                return listOf(
+                    User(
+                        id = data["email"]!!,
+                        name = data["username"]!!,
+                        extras = mapOf("session" to session)
+                    )
+                )
+            }
             "login" -> {
-                val email = requireNotNull(data["email"]) { "Email is required" }
-                val password = requireNotNull(data["password"]) { "Password is required" }
-                val response = api.login(email, password)
+                val response = api.login(
+                    username = data["email"]!!,
+                    password = data["password"]!!
+                )
                 val parsedResponse = json.decodeFromString<LoginResponse>(response.body.string())
                 val session = extractSession(response.headers["set-cookie"])
                     ?: throw Exception("Failed to extract session from response")
@@ -215,22 +239,6 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     User(
                         id = parsedResponse.user.id.toString(),
                         name = parsedResponse.user.username,
-                        extras = mapOf("session" to session)
-                    )
-                )
-
-            }
-            "register" -> {
-                val username = requireNotNull(data["username"]) { "Username is required" }
-                val email = requireNotNull(data["email"]) { "Email is required" }
-                val password = requireNotNull(data["password"]) { "Password is required" }
-                val response = api.register(username, email, password)
-                val session = extractSession(response.headers["set-cookie"])
-                    ?: throw Exception("Failed to extract session from response")
-                return listOf(
-                    User(
-                        id = email,
-                        name = username,
                         extras = mapOf("session" to session)
                     )
                 )
@@ -309,7 +317,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         val session = _session ?: return false
         if (shouldFetchLikes) {
             likedList.run {
-                clear()
+               clear()
                 addAll(api.getFavourites(session).track.map { it.toTrack() })
             }
             shouldFetchLikes = false
@@ -388,5 +396,4 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         Album("album"),
         Artist("artist"),
     }
-
 }

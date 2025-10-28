@@ -5,7 +5,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -15,16 +15,7 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient) {
-
-    protected abstract val baseUrl: String
-
-    @PublishedApi
-    internal val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-    }
-
+abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient, @PublishedApi internal val json: Json) {
     @PublishedApi
     internal val jsonMediaType = "application/json".toMediaType()
 
@@ -32,15 +23,11 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient) {
      * Performs a GET request.
      */
     protected suspend inline fun <reified T> get(
-        endpoint: String,
-        params: Map<String, Any> = emptyMap(),
-        sessionCookie: String? = null
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null
     ): T {
-        val urlBuilder = baseUrl.toHttpUrl().newBuilder().addPathSegments(endpoint)
-        params.forEach { (key, value) -> urlBuilder.addQueryParameter(key, value.toString()) }
-        val requestBuilder = Request.Builder().url(urlBuilder.build()).get()
-        sessionCookie?.let { requestBuilder.header("Cookie", it) }
-        val request = requestBuilder.build()
+        val request = buildRequest(url, params, headers).get().build()
         val response = execute(request)
         val responseBody = response.body.string()
         return json.decodeFromString(responseBody)
@@ -49,15 +36,13 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient) {
     /**
      * Performs a POST request with a JSON body.
      */
-    protected suspend fun post(
-        endpoint: String,
+    protected suspend inline fun <reified T> post(
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null,
         jsonBody: String,
-        sessionCookie: String? = null
     ): Response {
-        val requestBody = jsonBody.toRequestBody(jsonMediaType)
-        val requestBuilder = Request.Builder().url(baseUrl.toHttpUrl().newBuilder().addPathSegments(endpoint).build()).post(requestBody)
-        sessionCookie?.let { requestBuilder.header("Cookie", it) }
-        val request = requestBuilder.build()
+        val request = buildRequest(url, params, headers).post(jsonBody.toRequestBody(jsonMediaType)).build()
         return execute(request)
     }
 
@@ -65,14 +50,28 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient) {
      * Performs a PATCH request with a JSON body.
      */
     protected suspend inline fun <reified T> patch(
-        endpoint: String,
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null,
         jsonBody: String,
-        sessionCookie: String? = null
     ): T {
-        val requestBody = jsonBody.toRequestBody(jsonMediaType)
-        val requestBuilder = Request.Builder().url(baseUrl.toHttpUrl().newBuilder().addPathSegments(endpoint).build()).patch(requestBody)
-        sessionCookie?.let { requestBuilder.header("Cookie", it) }
-        val request = requestBuilder.build()
+        val request = buildRequest(url, params, headers).patch(jsonBody.toRequestBody(jsonMediaType)).build()
+        val response = execute(request)
+        val responseBody = response.body.string()
+        return json.decodeFromString(responseBody)
+    }
+
+    /**
+     * Performs a PUT request with a JSON body.
+     */
+    protected suspend inline fun <reified T> put(
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null,
+        jsonBody: String,
+    ): T {
+        val request =
+            buildRequest(url, params, headers).put(jsonBody.toRequestBody(jsonMediaType)).build()
         val response = execute(request)
         val responseBody = response.body.string()
         return json.decodeFromString(responseBody)
@@ -82,15 +81,12 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient) {
      * Performs a DELETE request.
      */
     protected suspend inline fun <reified T> delete(
-        endpoint: String,
-        params: Map<String, Any> = emptyMap(),
-        sessionCookie: String? = null
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null,
+        jsonBody: String? = null,
     ): T {
-        val urlBuilder = baseUrl.toHttpUrl().newBuilder().addPathSegments(endpoint)
-        params.forEach { (key, value) -> urlBuilder.addQueryParameter(key, value.toString()) }
-        val requestBuilder = Request.Builder().url(urlBuilder.build()).delete()
-        sessionCookie?.let { requestBuilder.header("Cookie", it) }
-        val request = requestBuilder.build()
+        val request = buildRequest(url, params, headers).delete(jsonBody?.toRequestBody(jsonMediaType)).build()
         val response = execute(request)
         val responseBody = response.body.string()
         return json.decodeFromString(responseBody)
@@ -128,6 +124,45 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient) {
             })
             continuation.invokeOnCancellation {
                 cancel()
+            }
+        }
+    }
+
+
+    /**
+     * Builds an [okhttp3.Request.Builder] from the given parameters without specifying an HTTP method.
+     *
+     * - Appends [params] as query parameters if provided and non-null.
+     * - Adds [headers] as request headers if provided and non-null.
+     * - Skips entries with null or empty values.
+     *
+     * @param url The absolute or relative URL for the request.
+     * @param params Optional map of query parameters to be appended to the URL.
+     * @param headers Optional map of request headers to be added to the request.
+     *
+     * @return A [Request.Builder] with the URL and headers set. The caller is responsible
+     *         for setting the HTTP method and body before building the final [Request].
+     *
+     * @throws IllegalArgumentException If the provided [url] is invalid or cannot be parsed.
+     */
+    @PublishedApi
+    internal fun buildRequest(
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null
+    ): Request.Builder {
+        val httpUrl = url.let {
+            val builder = url.toHttpUrlOrNull()?.newBuilder() ?: throw IllegalArgumentException("Invalid URL: $it")
+            params?.forEach { (key, value) ->
+                if (value.isNotEmpty()) builder.addQueryParameter(key, value)
+            }
+            builder.build()
+        }
+
+
+        return Request.Builder().url(httpUrl).apply {
+            headers?.forEach { (key, value) ->
+                if (value.isNotEmpty()) addHeader(key, value)
             }
         }
     }
