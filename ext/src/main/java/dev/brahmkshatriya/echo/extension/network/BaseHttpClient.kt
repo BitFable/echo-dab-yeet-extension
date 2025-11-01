@@ -116,7 +116,7 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient, @
         if (!response.isSuccessful) {
             val errorResponse = json.decodeFromString<ErrorResponse>(response.body.string())
             throw Exception(
-                "Error ${response.code}: ${errorResponse.message ?:  errorResponse.error ?: "Unknown error"}"
+                "Error ${response.code}: ${errorResponse.error ?:  errorResponse.message ?: "Unknown error"}"
             )
         }
         return response
