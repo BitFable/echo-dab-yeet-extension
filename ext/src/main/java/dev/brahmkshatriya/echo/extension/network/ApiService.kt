@@ -3,6 +3,9 @@ package dev.brahmkshatriya.echo.extension.network
 import dev.brahmkshatriya.echo.extension.models.AlbumResponse
 import dev.brahmkshatriya.echo.extension.models.ArtistResponse
 import dev.brahmkshatriya.echo.extension.models.FavouriteResponse
+import dev.brahmkshatriya.echo.extension.models.GenericResponse
+import dev.brahmkshatriya.echo.extension.models.LibrariesResponse
+import dev.brahmkshatriya.echo.extension.models.LibraryResponse
 import dev.brahmkshatriya.echo.extension.models.LoginRequest
 import dev.brahmkshatriya.echo.extension.models.RegisterRequest
 import dev.brahmkshatriya.echo.extension.models.SearchResponse
@@ -54,22 +57,71 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
     }
 
     suspend fun login(username: String, password: String): Response {
-        return post<Response>(
+        return postResponse(
             url = "${baseUrl}/auth/login",
             jsonBody = LoginRequest(username, password).toJsonString()
         )
     }
 
     suspend fun register(username: String, email: String, password: String, inviteCode: String): Response {
-        return post<Response>(
+        return postResponse(
             url = "${baseUrl}/auth/register",
             jsonBody = RegisterRequest(username, email, password, inviteCode).toJsonString()
         )
     }
 
-    suspend fun getPlaylists(id: String? = null, session: String): Response {
+    suspend fun getPlaylists(session: String): LibrariesResponse {
+        return get(
+            url = "${baseUrl}/libraries",
+            headers = mapOf("Cookie" to session)
+        )
+    }
+
+    suspend fun getPlaylist(id: String, session: String, page: Int = 1, limit: Int? = null): LibraryResponse {
         return get(
             url = "${baseUrl}/libraries/${id}",
+            params = mapOf(
+                "page" to page.toString(),
+                "limit" to (limit ?: "").toString()
+            ),
+            headers = mapOf("Cookie" to session)
+        )
+    }
+
+    suspend fun createLibrary(json: String, session: String): LibraryResponse {
+        return post<LibraryResponse>(
+            url = "${baseUrl}/libraries",
+            jsonBody = json,
+            headers = mapOf("Cookie" to session)
+        )
+    }
+
+    suspend fun editLibraryMetadata(id: String, json: String, session: String): GenericResponse {
+        return patch<GenericResponse>(
+            url = "${baseUrl}/libraries/${id}",
+            jsonBody = json,
+            headers = mapOf("Cookie" to session)
+        ).let { println(it.message); it }
+    }
+
+    suspend fun deleteLibrary(id: String, session: String): GenericResponse {
+        return delete(
+            url = "${baseUrl}/libraries/${id}",
+            headers = mapOf("Cookie" to session)
+        )
+    }
+
+    suspend fun addToLibrary(id: String, json: String, session: String): GenericResponse {
+        return post(
+            url = "${baseUrl}/libraries/${id}/tracks",
+            jsonBody = json,
+            headers = mapOf("Cookie" to session)
+        )
+    }
+
+    suspend fun removeFromLibrary(id: String, trackId: String, session: String): GenericResponse {
+        return delete(
+            url = "${baseUrl}/libraries/${id}/tracks/${trackId}",
             headers = mapOf("Cookie" to session)
         )
     }
@@ -81,15 +133,15 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
         )
     }
 
-    suspend fun addFavourite(json: String, session: String): Response {
-        return post<Response>(
+    suspend fun addFavourite(json: String, session: String): GenericResponse {
+        return post(
             url = "${baseUrl}/favorites",
             jsonBody = json,
             headers = mapOf("Cookie" to session)
         )
     }
 
-    suspend fun removeFavourite(id: String, session: String): Response {
+    suspend fun removeFavourite(id: String, session: String): GenericResponse {
         return delete(
             url = "${baseUrl}/favorites",
             params = mapOf("trackId" to id),

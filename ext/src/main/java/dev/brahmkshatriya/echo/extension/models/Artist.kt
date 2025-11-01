@@ -11,7 +11,7 @@ data class ArtistResponse(
     val artist: Artist,
     val albums: List<Album>
 ) {
-    fun toArtist(): EchoArtist {
+    fun toArtist(json: Json): EchoArtist {
         val albumList = albums.map { it.toAlbum() }
         return EchoArtist(
             id = artist.id,
@@ -19,9 +19,9 @@ data class ArtistResponse(
             cover = artist.image?.high?.toImageHolder(),
             bio = artist.biography?.content.orEmpty(),
             extras = mapOf(
-                "similarArtistIds" to Json.encodeToString(artist.similarArtistIds),
-                "slug" to artist.slug,
-                "albumList" to Json.encodeToString(albumList),
+                "similarArtistIds" to json.encodeToString(artist.similarArtistIds),
+                "slug" to (artist.slug ?: ""),
+                "albumList" to json.encodeToString(albumList),
                 "isLoaded" to "true"
             )
         )
@@ -44,23 +44,9 @@ data class Artist(
     val albumsCount: Int,
     val albumsAsPrimaryArtistCount: Int,
     val albumsAsPrimaryComposerCount: Int,
-    val slug: String,
+    val slug: String? = null,
     val image: Images? = null,
     val biography: Biography? = null,
     val similarArtistIds: List<String>,
     val information: String? = null
-) {
-    fun toArtist(): EchoArtist {
-        return EchoArtist(
-            id = id,
-            name = name,
-            cover = image?.high?.toImageHolder(),
-            bio = biography?.content.orEmpty(),
-            extras = mapOf(
-                "similarArtistIds" to Json.encodeToString(similarArtistIds),
-                "slug" to slug,
-                "isLoaded" to "false"
-            )
-        )
-    }
-}
+)

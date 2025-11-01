@@ -6,6 +6,9 @@ import dev.brahmkshatriya.echo.common.clients.ExtensionClient
 import dev.brahmkshatriya.echo.common.clients.LibraryFeedClient
 import dev.brahmkshatriya.echo.common.clients.LikeClient
 import dev.brahmkshatriya.echo.common.clients.LoginClient
+import dev.brahmkshatriya.echo.common.clients.PlaylistClient
+import dev.brahmkshatriya.echo.common.clients.PlaylistEditClient
+import dev.brahmkshatriya.echo.common.clients.PlaylistEditPrivacyClient
 import dev.brahmkshatriya.echo.common.clients.SearchFeedClient
 import dev.brahmkshatriya.echo.common.clients.ShareClient
 import dev.brahmkshatriya.echo.common.clients.TrackClient
@@ -26,24 +29,26 @@ import dev.brahmkshatriya.echo.common.models.Track
 import dev.brahmkshatriya.echo.common.models.User
 import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
+import dev.brahmkshatriya.echo.extension.models.Library
 import dev.brahmkshatriya.echo.extension.models.LoginResponse
 import dev.brahmkshatriya.echo.extension.models.Pagination
 import dev.brahmkshatriya.echo.extension.network.ApiService
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
+@Suppress("unused")
 class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumClient, ArtistClient,
-    ShareClient, LoginClient.CustomInput, LibraryFeedClient, LikeClient {
+    ShareClient, LoginClient.CustomInput, LibraryFeedClient, LikeClient, PlaylistClient, PlaylistEditClient, PlaylistEditPrivacyClient{
 
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
     private val client by lazy { OkHttpClient.Builder().build() }
-
     private val api by lazy { ApiService(client, json) }
 
     private var _session: String? = null
+
 
     // ===== Settings ===== //
 
@@ -78,7 +83,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             title = "Tracks",
             type = Shelf.Lists.Type.Grid,
             search = { offset -> api.search(query, offset, MediaType.Track.type, session) },
-            extractItems = { it.tracks?.map { t -> t.toTrack() } ?: emptyList() },
+            extractItems = { it.tracks?.map { t -> t.toTrack(json) } ?: emptyList() },
             extractPagination = { it.pagination }
         )
 
@@ -110,7 +115,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     }
 
     override suspend fun loadTracks(album: Album): Feed<Track>? {
-        val albumList = api.getAlbum(album.id).album.tracks?.map { it.toTrack() }.orEmpty()
+        val albumList = api.getAlbum(album.id).album.tracks?.map { it.toTrack(json) }.orEmpty()
         if (albumList.isNotEmpty()) {
             return albumList.toFeed()
         }
@@ -125,7 +130,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         return if (artist.isLoaded()) {
             artist
         } else {
-            api.getArtist(artist.id).toArtist()
+            api.getArtist(artist.id).toArtist(json)
         }
     }
 
@@ -133,7 +138,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         val data = if (artist.isLoaded()) {
             artist
         } else {
-            api.getArtist(artist.id).toArtist()
+            api.getArtist(artist.id).toArtist(json)
         }
         val albumList = json.decodeFromString<List<Album>>(data.extras["albumList"]!!)
         json.decodeFromString<List<String>>(data.extras["similarArtistIds"]!!)
@@ -280,7 +285,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
 
         likedList.run {
             clear()
-            addAll(api.getFavourites(session).track.map { it.toTrack() })
+            addAll(api.getFavourites(session).track.map { it.toTrack(json) })
         }
         shouldFetchLikes = false
 
@@ -291,7 +296,17 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             type = Shelf.Lists.Type.Linear,
             more = if (likedList.isNotEmpty()) { likedList.toList().map { it.toShelf() }.toFeed(Feed.Buttons(showPlayAndShuffle=true)) } else null
         )
-        return listOf(favShelf).toFeed()
+
+        val playlists = api.getPlaylists(session).libraries.map { it.toPlaylist() }
+
+        val playlistShelf = Shelf.Lists.Items(
+            id = "playlist",
+            title = "Playlists",
+            list = playlists,
+            type = Shelf.Lists.Type.Linear,
+        )
+
+        return listOf(favShelf, playlistShelf).toFeed()
     }
 
     // ===== LikeClient ===== //
@@ -318,13 +333,145 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         if (shouldFetchLikes) {
             likedList.run {
                clear()
-                addAll(api.getFavourites(session).track.map { it.toTrack() })
+                addAll(api.getFavourites(session).track.map { it.toTrack(json) })
             }
             shouldFetchLikes = false
         }
         return likedList.any { it.id == item.id }
     }
 
+
+    // ====== PlaylistClient ======= //
+
+    override suspend fun loadPlaylist(playlist: Playlist): Playlist {
+        val session = _session ?: throw ClientException.LoginRequired()
+
+        return api.getPlaylist(playlist.id, session).library.toPlaylist()
+    }
+
+    override suspend fun loadTracks(playlist: Playlist): Feed<Track> {
+        val session = _session ?: throw ClientException.LoginRequired()
+
+        return PagedData.Continuous { continuation ->
+            val currentPage = continuation?.toIntOrNull() ?: 1
+            api.getPlaylist(playlist.id, session, currentPage).let { response ->
+                val tracks = response.library.tracks?.map { it.toTrack(json) }.orEmpty()
+                val nextContinuation =
+                    if (response.library.pagination?.hasMore == true) (currentPage + 1).toString() else null
+                Page(tracks, nextContinuation)
+            }
+        }.toFeed()
+    }
+
+    override suspend fun loadFeed(playlist: Playlist): Feed<Shelf>? = null
+
+    // ====== PlaylistEditClient ===== //
+
+    override suspend fun createPlaylist(
+        title: String,
+        description: String?
+    ): Playlist {
+        val session = _session ?: throw ClientException.LoginRequired()
+
+        val playlistJson = Library(
+            name = title,
+            description = description
+        )
+
+        api.createLibrary(
+            json = json.encodeToString(playlistJson),
+            session = session
+        ).let { response ->
+            return response.library.toPlaylist()
+        }
+    }
+
+    override suspend fun deletePlaylist(playlist: Playlist) {
+        val session = _session ?: throw ClientException.LoginRequired()
+        api.deleteLibrary(playlist.id, session)
+    }
+
+    override suspend fun editPlaylistMetadata(
+        playlist: Playlist,
+        title: String,
+        description: String?
+    ) {
+        val session = _session ?: throw ClientException.LoginRequired()
+
+        val playlistJson = Library(
+            name = title,
+            description = description,
+            isPublic = !playlist.isPrivate
+        )
+
+        api.editLibraryMetadata(
+            id = playlist.id,
+            json = json.encodeToString(playlistJson),
+            session = session
+        )
+    }
+
+    override suspend fun addTracksToPlaylist(
+        playlist: Playlist,
+        tracks: List<Track>,
+        index: Int,
+        new: List<Track>
+    ) {
+        val session = _session ?: throw ClientException.LoginRequired()
+        new.forEach {
+            api.addToLibrary(playlist.id, it.extras["rawJson"]!!, session)
+        }
+    }
+
+    override suspend fun removeTracksFromPlaylist(
+        playlist: Playlist,
+        tracks: List<Track>,
+        indexes: List<Int>
+    ) {
+        val session = _session ?: throw ClientException.LoginRequired()
+        indexes.forEach { index ->
+            api.removeFromLibrary(playlist.id, tracks[index].id, session)
+        }
+    }
+
+    override suspend fun moveTrackInPlaylist(
+        playlist: Playlist,
+        tracks: List<Track>,
+        fromIndex: Int,
+        toIndex: Int
+    ) {
+        throw ClientException.NotSupported("Will not be implemented")
+    }
+
+    override suspend fun listEditablePlaylists(track: Track?): List<Pair<Playlist, Boolean>> {
+        val session = _session ?: throw ClientException.LoginRequired()
+
+        val playlists: MutableList<Pair<Playlist, Boolean>> = mutableListOf()
+        api.getPlaylists(session).libraries.forEach { playlist ->
+            playlists.add(playlist.toPlaylist() to false)
+        }
+        return playlists
+    }
+
+    // ====== PlaylistEditPrivacyClient ===== //
+
+    override suspend fun setPrivacy(
+        playlist: Playlist,
+        isPrivate: Boolean
+    ) {
+        val session = _session ?: throw ClientException.LoginRequired()
+        val playlistJson = Library(
+            name = playlist.title,
+            description = playlist.description,
+            isPublic = !isPrivate
+        )
+
+        api.editLibraryMetadata(
+            id = playlist.id,
+            json = json.encodeToString(playlistJson),
+            session = session
+        )
+    }
 
     // ====== ShareClient ===== //
 
@@ -338,7 +485,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                 "https://www.qobuz.com/us-en/interpreter/$slug/$id"
             }
 
-            is Playlist -> throw ClientException.NotSupported("TODO: Playlist sharing")
+            is Playlist -> "https://dab.yeet.su/shared/library/${item.id}"
             is Radio -> throw ClientException.NotSupported("Will not be implemented")
         }
     }
@@ -350,6 +497,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             is Track -> extras["isLoaded"] == "true"
             is Album -> extras["isLoaded"] == "true"
             is Artist -> extras["isLoaded"] == "true"
+            is Playlist -> extras["isLoaded"] == "true"
             else -> throw TypeCastException("Type mismatch: expected Echo Model but found ${this::class.simpleName}")
         }
     }
@@ -371,7 +519,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                 0
             } else {
                 val current = json.decodeFromString<Pagination>(paginationString)
-                current.offset + current.limit
+                current.offset!! + current.limit
             }
 
             val response = if (offset == 0) firstResponse else search(offset)

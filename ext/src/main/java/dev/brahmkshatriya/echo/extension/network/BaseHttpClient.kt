@@ -34,9 +34,9 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient, @
     }
 
     /**
-     * Performs a POST request with a JSON body.
+     * Performs a POST request with a JSON body. Directly returns the response.
      */
-    protected suspend inline fun <reified T> post(
+    protected suspend inline fun postResponse(
         url: String,
         params: Map<String, String>? = null,
         headers: Map<String, String>? = null,
@@ -44,6 +44,21 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient, @
     ): Response {
         val request = buildRequest(url, params, headers).post(jsonBody.toRequestBody(jsonMediaType)).build()
         return execute(request)
+    }
+
+    /**
+     * Performs a POST request with a JSON body.
+     */
+    protected suspend inline fun <reified T> post(
+        url: String,
+        params: Map<String, String>? = null,
+        headers: Map<String, String>? = null,
+        jsonBody: String,
+    ): T {
+        val request = buildRequest(url, params, headers).post(jsonBody.toRequestBody(jsonMediaType)).build()
+        val response = execute(request)
+        val responseBody = response.body.string()
+        return json.decodeFromString(responseBody)
     }
 
     /**
@@ -101,7 +116,7 @@ abstract class BaseHttpClient(@PublishedApi internal val client: OkHttpClient, @
         if (!response.isSuccessful) {
             val errorResponse = json.decodeFromString<ErrorResponse>(response.body.string())
             throw Exception(
-                "Error ${response.code}: ${errorResponse.error ?:  errorResponse.message ?: "Unknown error"}"
+                "Error ${response.code}: ${errorResponse.message ?:  errorResponse.error ?: "Unknown error"}"
             )
         }
         return response

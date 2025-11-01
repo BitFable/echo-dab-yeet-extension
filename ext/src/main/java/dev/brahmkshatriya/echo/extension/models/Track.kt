@@ -34,11 +34,8 @@ data class Track(
     val isrc: String? = null,
     val images: Images? = null
 ) {
-    @Serializable
-    private data class TrackWrapper(val track: Track)
-
-    fun toTrack(): EchoTrack {
-        val trackJson = Json.encodeToString(this)
+    fun toTrack(json: Json): EchoTrack {
+        val trackJson = json.encodeToString(this)
 
         val rawJson =  """{"track": $trackJson}"""
 

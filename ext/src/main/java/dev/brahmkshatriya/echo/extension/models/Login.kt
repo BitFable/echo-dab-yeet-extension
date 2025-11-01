@@ -31,3 +31,4 @@ data class RegisterRequest(
     val password: String,
     val inviteCode: String
 )
+
