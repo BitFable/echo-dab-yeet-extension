@@ -33,8 +33,10 @@ import dev.brahmkshatriya.echo.extension.models.Library
 import dev.brahmkshatriya.echo.extension.models.LoginResponse
 import dev.brahmkshatriya.echo.extension.models.Pagination
 import dev.brahmkshatriya.echo.extension.network.ApiService
+import dev.brahmkshatriya.echo.extension.network.RateLimitInterceptor
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 @Suppress("unused")
 class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumClient, ArtistClient,
@@ -44,7 +46,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         ignoreUnknownKeys = true
         isLenient = true
     }
-    private val client by lazy { OkHttpClient.Builder().build() }
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .addInterceptor(RateLimitInterceptor(permits = 3, period = 1, unit = TimeUnit.SECONDS))
+            .build()
+    }
+
     private val api by lazy { ApiService(client, json) }
 
     private var _session: String? = null
@@ -183,8 +190,8 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     LoginClient.InputField(
                         type = LoginClient.InputField.Type.Misc,
                         key = "inviteCode",
-                        label = "Invite Code",
-                        isRequired = true
+                        label = "Invite Code (optional)",
+                        isRequired = false
                     )
                 )
             ),
@@ -220,7 +227,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     username = data["username"]!!,
                     email = data["email"]!!,
                     password = data["password"]!!,
-                    inviteCode = data["inviteCode"]!!
+                    inviteCode = data["inviteCode"]
                 )
                 val session = extractSession(response.headers["set-cookie"])
                     ?: throw Exception("Failed to extract session from response")

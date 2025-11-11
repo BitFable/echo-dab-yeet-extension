@@ -63,7 +63,7 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
         )
     }
 
-    suspend fun register(username: String, email: String, password: String, inviteCode: String): Response {
+    suspend fun register(username: String, email: String, password: String, inviteCode: String?): Response {
         return postResponse(
             url = "${baseUrl}/auth/register",
             jsonBody = RegisterRequest(username, email, password, inviteCode).toJsonString()
