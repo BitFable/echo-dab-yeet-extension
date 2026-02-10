@@ -3,6 +3,7 @@ package dev.brahmkshatriya.echo.extension.network
 import dev.brahmkshatriya.echo.extension.models.AlbumResponse
 import dev.brahmkshatriya.echo.extension.models.ArtistResponse
 import dev.brahmkshatriya.echo.extension.models.FavouriteResponse
+import dev.brahmkshatriya.echo.extension.models.FeaturedResponse
 import dev.brahmkshatriya.echo.extension.models.GenericResponse
 import dev.brahmkshatriya.echo.extension.models.LibrariesResponse
 import dev.brahmkshatriya.echo.extension.models.LibraryResponse
@@ -14,9 +15,9 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Response
 
-class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json) {
+class ApiService(client: OkHttpClient, json: Json, domain: String) : BaseHttpClient(client, json) {
 
-    val baseUrl: String = "https://dabmusic.xyz/api"
+    val baseUrl: String = "https://${domain}/api"
 
     suspend fun getAlbum(id: String): AlbumResponse {
         return get(
@@ -35,8 +36,7 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
     suspend fun search(
         query: String,
         offset: Int = 0,
-        type: String,
-        session: String
+        type: String
     ): SearchResponse {
         return get(
             url = "${baseUrl}/search",
@@ -44,8 +44,7 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
                 "q" to query,
                 "offset" to offset.toString(),
                 "type" to type
-            ),
-            headers = mapOf("Cookie" to session)
+            )
         )
     }
 
@@ -85,6 +84,17 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
                 "limit" to (limit ?: "").toString()
             ),
             headers = mapOf("Cookie" to session)
+        )
+    }
+
+    suspend fun getFeaturedAlbums(type: String, offset: Int? = 0, limit: Int? = 25): FeaturedResponse {
+        return get(
+            url = "${baseUrl}/featured-albums",
+            params = mapOf(
+                "type" to type,
+                "offset" to (offset ?: "").toString(),
+                "limit" to (limit ?: "").toString()
+            )
         )
     }
 

@@ -1,5 +1,5 @@
 [versions]
-echoCommon = "1.0"
+echoCommon = "1.0.0"
 kotlin = "2.2.10"
 agp = "8.12.1"
 gradleShadow = "9.0.2"

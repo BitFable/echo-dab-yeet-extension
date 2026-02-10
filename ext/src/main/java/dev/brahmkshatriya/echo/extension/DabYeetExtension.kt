@@ -3,6 +3,7 @@ package dev.brahmkshatriya.echo.extension
 import dev.brahmkshatriya.echo.common.clients.AlbumClient
 import dev.brahmkshatriya.echo.common.clients.ArtistClient
 import dev.brahmkshatriya.echo.common.clients.ExtensionClient
+import dev.brahmkshatriya.echo.common.clients.HomeFeedClient
 import dev.brahmkshatriya.echo.common.clients.LibraryFeedClient
 import dev.brahmkshatriya.echo.common.clients.LikeClient
 import dev.brahmkshatriya.echo.common.clients.LoginClient
@@ -30,17 +31,19 @@ import dev.brahmkshatriya.echo.common.models.User
 import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
 import dev.brahmkshatriya.echo.extension.models.Library
-import dev.brahmkshatriya.echo.extension.models.LoginResponse
 import dev.brahmkshatriya.echo.extension.models.Pagination
 import dev.brahmkshatriya.echo.extension.network.ApiService
 import dev.brahmkshatriya.echo.extension.network.RateLimitInterceptor
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
+import java.util.Locale.getDefault
 
 @Suppress("unused")
 class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumClient, ArtistClient,
-    ShareClient, LoginClient.CustomInput, LibraryFeedClient, LikeClient, PlaylistClient, PlaylistEditClient, PlaylistEditPrivacyClient{
+    ShareClient, LoginClient.CustomInput, LibraryFeedClient, LikeClient, PlaylistClient, PlaylistEditClient, PlaylistEditPrivacyClient,
+    HomeFeedClient {
+
+     private val domain = "dab.yeet.su"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -48,11 +51,11 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     }
     private val client by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(RateLimitInterceptor(permits = 3, period = 1, unit = TimeUnit.SECONDS))
+            .addInterceptor(RateLimitInterceptor(4, 1000))
             .build()
     }
 
-    private val api by lazy { ApiService(client, json) }
+    private val api by lazy { ApiService(client, json, domain!!) }
 
     private var _session: String? = null
 
@@ -66,21 +69,64 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         likedList.clear()
     }
 
-    override suspend fun getSettingItems(): List<Setting> = listOf()
+    override suspend fun getSettingItems(): List<Setting> {
+        return listOf(
+//            SettingList(
+//                title = "Base Url",
+//                key = "baseUrl",
+//                summary = "The base url of the api",
+//                entryTitles = listOf("dab.yeet.su", "dabmusic.xyz"),
+//                entryValues = listOf("dab.yeet.su", "dabmusic.xyz"),
+//                defaultEntryIndex = 0
+//            )
+        )
+    }
 
-    override fun setSettings(settings: Settings) {}
+    override fun setSettings(settings: Settings) {
+         // domain = settings.getString("baseUrl")
+    }
+
+
+    //===== HomeFeedClient =====//
+
+    private val featuredAlbumCategories = listOf(
+        "new-releases",
+        "most-streamed",
+        "best-sellers",
+        "press-awards",
+        "editor-picks",
+        "most-featured"
+    )
+
+    override suspend fun loadHomeFeed(): Feed<Shelf> {
+        val formattedShelf = mutableListOf<Shelf>()
+
+        featuredAlbumCategories.forEach { type ->
+            val shelf = buildPagedShelf(
+                id = type,
+                title = type.replace("-", " ")
+                    .replaceFirstChar { if (it.isLowerCase()) it.titlecase(getDefault()) else it.toString() },
+                type = Shelf.Lists.Type.Linear,
+                search = { offset -> api.getFeaturedAlbums(type, offset) },
+                extractItems = { it.albums?.map { a -> a.toAlbum() } ?: emptyList() },
+                extractPagination = { it.pagination }
+            )
+            formattedShelf.add(shelf)
+        }
+
+        return formattedShelf.toFeed()
+    }
 
     //==== SearchFeedClient ====//
 
     override suspend fun loadSearchFeed(query: String): Feed<Shelf> {
-        val session = _session ?: throw ClientException.LoginRequired()
         if (query.isBlank()) return emptyList<Shelf>().toFeed()
 
         val albumShelf = buildPagedShelf(
             id = "0",
             title = "Albums",
             type = Shelf.Lists.Type.Linear,
-            search = { offset -> api.search(query, offset, MediaType.Album.type, session) },
+            search = { offset -> api.search(query, offset, MediaType.Album.type) },
             extractItems = { it.albums?.map { a -> a.toAlbum() } ?: emptyList() },
             extractPagination = { it.pagination }
         )
@@ -89,7 +135,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             id = "1",
             title = "Tracks",
             type = Shelf.Lists.Type.Grid,
-            search = { offset -> api.search(query, offset, MediaType.Track.type, session) },
+            search = { offset -> api.search(query, offset, MediaType.Track.type) },
             extractItems = { it.tracks?.map { t -> t.toTrack(json) } ?: emptyList() },
             extractPagination = { it.pagination }
         )
@@ -235,7 +281,11 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     User(
                         id = data["email"]!!,
                         name = data["username"]!!,
-                        extras = mapOf("session" to session)
+                        extras = mapOf(
+                            "session" to session,
+                            "email" to data["email"]!!,
+                            "password" to data["password"]!!
+                        )
                     )
                 )
             }
@@ -244,14 +294,17 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     username = data["email"]!!,
                     password = data["password"]!!
                 )
-                val parsedResponse = json.decodeFromString<LoginResponse>(response.body.string())
                 val session = extractSession(response.headers["set-cookie"])
                     ?: throw Exception("Failed to extract session from response")
                 return listOf(
                     User(
-                        id = parsedResponse.user.id.toString(),
-                        name = parsedResponse.user.username,
-                        extras = mapOf("session" to session)
+                        id = data["email"]!!,
+                        name = data["username"]!!,
+                        extras = mapOf(
+                            "session" to session,
+                            "email" to data["email"]!!,
+                            "password" to data["password"]!!
+                        )
                     )
                 )
             }
