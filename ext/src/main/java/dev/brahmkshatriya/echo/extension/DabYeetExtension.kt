@@ -31,11 +31,15 @@ import dev.brahmkshatriya.echo.common.models.User
 import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
 import dev.brahmkshatriya.echo.extension.models.Library
+import dev.brahmkshatriya.echo.extension.models.LoginResponse
 import dev.brahmkshatriya.echo.extension.models.Pagination
 import dev.brahmkshatriya.echo.extension.network.ApiService
 import dev.brahmkshatriya.echo.extension.network.RateLimitInterceptor
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import okhttp3.Cookie
 import okhttp3.OkHttpClient
+import okhttp3.Response
 import java.util.Locale.getDefault
 
 @Suppress("unused")
@@ -43,19 +47,17 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     ShareClient, LoginClient.CustomInput, LibraryFeedClient, LikeClient, PlaylistClient, PlaylistEditClient, PlaylistEditPrivacyClient,
     HomeFeedClient {
 
-     private val domain = "dab.yeet.su"
-
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
     private val client by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(RateLimitInterceptor(4, 1000))
+            .addInterceptor(RateLimitInterceptor(5.0, 15, 30L))
             .build()
     }
 
-    private val api by lazy { ApiService(client, json, domain!!) }
+    private val api by lazy { ApiService(client, json) }
 
     private var _session: String? = null
 
@@ -65,26 +67,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     override suspend fun onExtensionSelected() {}
 
     override suspend fun onInitialize() {
-        _session = null
         likedList.clear()
     }
 
-    override suspend fun getSettingItems(): List<Setting> {
-        return listOf(
-//            SettingList(
-//                title = "Base Url",
-//                key = "baseUrl",
-//                summary = "The base url of the api",
-//                entryTitles = listOf("dab.yeet.su", "dabmusic.xyz"),
-//                entryValues = listOf("dab.yeet.su", "dabmusic.xyz"),
-//                defaultEntryIndex = 0
-//            )
-        )
-    }
+    override suspend fun getSettingItems(): List<Setting> = emptyList()
 
-    override fun setSettings(settings: Settings) {
-         // domain = settings.getString("baseUrl")
-    }
+    override fun setSettings(settings: Settings) {}
 
 
     //===== HomeFeedClient =====//
@@ -275,11 +263,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     password = data["password"]!!,
                     inviteCode = data["inviteCode"]
                 )
-                val session = extractSession(response.headers["set-cookie"])
+                val session = getSession(response)
                     ?: throw Exception("Failed to extract session from response")
+                val register = api.getAuth(session)
                 return listOf(
                     User(
-                        id = data["email"]!!,
+                        id = register.user?.id?.toString() ?: data["email"]!!,
                         name = data["username"]!!,
                         extras = mapOf(
                             "session" to session,
@@ -294,12 +283,13 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                     username = data["email"]!!,
                     password = data["password"]!!
                 )
-                val session = extractSession(response.headers["set-cookie"])
+                val session = getSession(response)
                     ?: throw Exception("Failed to extract session from response")
+                val login = json.decodeFromString<LoginResponse>(response.body.string())
                 return listOf(
                     User(
-                        id = data["email"]!!,
-                        name = data["username"]!!,
+                        id = login.user.id.toString(),
+                        name = login.user.username,
                         extras = mapOf(
                             "session" to session,
                             "email" to data["email"]!!,
@@ -314,26 +304,49 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
         }
     }
 
+    private fun getSession(response: Response): String? {
+        val cookies = Cookie.parseAll(
+            response.request.url,
+            response.headers
+        )
+        val session = cookies.find { it.name == "session" }?.value
 
-    private fun extractSession(cookieHeader: String?): String? {
-        if (cookieHeader == null) {
-            return null
+        return if (session != null) {
+            "session=$session"
+        } else {
+            null
         }
-
-        val cookies = cookieHeader.split(';')
-
-        for (cookie in cookies) {
-            val trimmedCookie = cookie.trim()
-            if (trimmedCookie.startsWith("session=")) {
-                return trimmedCookie
-            }
-        }
-        return null
     }
 
 
-    override fun setLoginUser(user: User?) {
-        _session = user?.extras?.get("session")
+    override fun setLoginUser(user: User?) = runBlocking {
+        if (_session == null && user == null) return@runBlocking
+
+        if (_session != null && isSessionValid(_session!!)) return@runBlocking
+
+        val userSession = user?.extras?.get("session")
+        if (userSession != null && isSessionValid(userSession)) {
+            _session = userSession
+            return@runBlocking
+        }
+
+        _session = if (user != null) {
+            runCatching {
+                val response = api.login(
+                    username = user.extras["email"]!!,
+                    password = user.extras["password"]!!
+                )
+                getSession(response)
+            }.getOrNull()
+        } else {
+            null
+        }
+    }
+
+    private suspend fun isSessionValid(session: String): Boolean {
+        return runCatching {
+            api.getAuth(session).user?.id != null
+        }.getOrDefault(false)
     }
 
     override suspend fun getCurrentUser(): User? = null
@@ -345,7 +358,9 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
 
         likedList.run {
             clear()
-            addAll(api.getFavourites(session).track.map { it.toTrack(json) })
+            val favorites = api.getFavourites(session)
+            println(favorites)
+            addAll(favorites.track.map { it.toTrack(json) })
         }
         shouldFetchLikes = false
 
@@ -354,7 +369,12 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             title = "Favourites",
             list = likedList.toList(),
             type = Shelf.Lists.Type.Linear,
-            more = if (likedList.isNotEmpty()) { likedList.toList().map { it.toShelf() }.toFeed(Feed.Buttons(showPlayAndShuffle=true)) } else null
+            more = if (likedList.isNotEmpty()) {
+                likedList.toList().map { it.toShelf() }.toFeed(
+                    Feed.Buttons(showPlayAndShuffle=true)
+                )
+            }
+            else null
         )
 
         val playlists = api.getPlaylists(session).libraries.map { it.toPlaylist() }

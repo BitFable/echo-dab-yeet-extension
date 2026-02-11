@@ -2,6 +2,7 @@ package dev.brahmkshatriya.echo.extension.network
 
 import dev.brahmkshatriya.echo.extension.models.AlbumResponse
 import dev.brahmkshatriya.echo.extension.models.ArtistResponse
+import dev.brahmkshatriya.echo.extension.models.AuthResponse
 import dev.brahmkshatriya.echo.extension.models.FavouriteResponse
 import dev.brahmkshatriya.echo.extension.models.FeaturedResponse
 import dev.brahmkshatriya.echo.extension.models.GenericResponse
@@ -15,9 +16,9 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Response
 
-class ApiService(client: OkHttpClient, json: Json, domain: String) : BaseHttpClient(client, json) {
+class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json) {
 
-    val baseUrl: String = "https://${domain}/api"
+    val baseUrl: String = "https://dabmusic.xyz/api"
 
     suspend fun getAlbum(id: String): AlbumResponse {
         return get(
@@ -98,6 +99,13 @@ class ApiService(client: OkHttpClient, json: Json, domain: String) : BaseHttpCli
         )
     }
 
+    suspend fun getAuth(session: String): AuthResponse {
+        return get(
+            url = "${baseUrl}/auth/me",
+            headers = mapOf("Cookie" to session)
+        )
+    }
+
     suspend fun createLibrary(json: String, session: String): LibraryResponse {
         return post<LibraryResponse>(
             url = "${baseUrl}/libraries",
@@ -111,7 +119,7 @@ class ApiService(client: OkHttpClient, json: Json, domain: String) : BaseHttpCli
             url = "${baseUrl}/libraries/${id}",
             jsonBody = json,
             headers = mapOf("Cookie" to session)
-        ).let { println(it.message); it }
+        )
     }
 
     suspend fun deleteLibrary(id: String, session: String): GenericResponse {

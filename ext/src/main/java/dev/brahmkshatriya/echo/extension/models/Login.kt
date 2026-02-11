@@ -10,6 +10,11 @@ data class LoginResponse(
 )
 
 @Serializable
+data class AuthResponse(
+    val user: User? = null
+)
+
+@Serializable
 data class User(
     val id: Int,
     val username: String,
