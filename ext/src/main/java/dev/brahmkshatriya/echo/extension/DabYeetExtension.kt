@@ -87,6 +87,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     )
 
     override suspend fun loadHomeFeed(): Feed<Shelf> {
+        val session = _session
         val formattedShelf = mutableListOf<Shelf>()
 
         featuredAlbumCategories.forEach { type ->
@@ -95,7 +96,11 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
                 title = type.replace("-", " ")
                     .replaceFirstChar { if (it.isLowerCase()) it.titlecase(getDefault()) else it.toString() },
                 type = Shelf.Lists.Type.Linear,
-                search = { offset -> api.getFeaturedAlbums(type, offset) },
+                search = { offset -> api.getFeaturedAlbums(
+                    type = type,
+                    offset = offset,
+                    session = session
+                ) },
                 extractItems = { it.albums?.map { a -> a.toAlbum() } ?: emptyList() },
                 extractPagination = { it.pagination }
             )
@@ -108,13 +113,14 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
     //==== SearchFeedClient ====//
 
     override suspend fun loadSearchFeed(query: String): Feed<Shelf> {
+        val session = _session
         if (query.isBlank()) return emptyList<Shelf>().toFeed()
 
         val albumShelf = buildPagedShelf(
             id = "0",
             title = "Albums",
             type = Shelf.Lists.Type.Linear,
-            search = { offset -> api.search(query, offset, MediaType.Album.type) },
+            search = { offset -> api.search(query, offset, MediaType.Album.type, session) },
             extractItems = { it.albums?.map { a -> a.toAlbum() } ?: emptyList() },
             extractPagination = { it.pagination }
         )
@@ -123,7 +129,7 @@ class DabYeetExtension : ExtensionClient, SearchFeedClient, TrackClient, AlbumCl
             id = "1",
             title = "Tracks",
             type = Shelf.Lists.Type.Grid,
-            search = { offset -> api.search(query, offset, MediaType.Track.type) },
+            search = { offset -> api.search(query, offset, MediaType.Track.type, session) },
             extractItems = { it.tracks?.map { t -> t.toTrack(json) } ?: emptyList() },
             extractPagination = { it.pagination }
         )

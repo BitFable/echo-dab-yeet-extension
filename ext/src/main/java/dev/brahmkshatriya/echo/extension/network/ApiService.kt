@@ -37,7 +37,8 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
     suspend fun search(
         query: String,
         offset: Int = 0,
-        type: String
+        type: String,
+        session: String?
     ): SearchResponse {
         return get(
             url = "${baseUrl}/search",
@@ -45,7 +46,8 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
                 "q" to query,
                 "offset" to offset.toString(),
                 "type" to type
-            )
+            ),
+            headers = session?.let { mapOf("Cookie" to it) }
         )
     }
 
@@ -88,14 +90,15 @@ class ApiService(client: OkHttpClient, json: Json) : BaseHttpClient(client, json
         )
     }
 
-    suspend fun getFeaturedAlbums(type: String, offset: Int? = 0, limit: Int? = 25): FeaturedResponse {
+    suspend fun getFeaturedAlbums(type: String, offset: Int? = 0, limit: Int? = 25, session: String?): FeaturedResponse {
         return get(
             url = "${baseUrl}/featured-albums",
             params = mapOf(
                 "type" to type,
                 "offset" to (offset ?: "").toString(),
-                "limit" to (limit ?: "").toString()
-            )
+                "limit" to (limit ?: "").toString(),
+            ),
+            headers = session?.let { mapOf("Cookie" to it) }
         )
     }
 
